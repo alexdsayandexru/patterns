@@ -2,15 +2,26 @@ package main
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
-func doRequests(cb *CircuitBreaker, count int) {
-	for i := 0; i < count; i++ {
-		result, err := cb.call()
-		fmt.Println(result, err)
-		time.Sleep(time.Second)
+func doSync(cb *CircuitBreaker) {
+	for i := 0; i < 1000; i++ {
+		cb.call(i)
 	}
+}
+
+func doAsync(cb *CircuitBreaker) {
+	var waitGroup sync.WaitGroup
+	for i := 0; i < 1000; i++ {
+		waitGroup.Add(1)
+		go func(i int) {
+			defer waitGroup.Done()
+			cb.call(i)
+		}(i)
+	}
+	waitGroup.Wait()
 }
 
 func main() {
@@ -20,7 +31,7 @@ func main() {
 		},
 		func(s string, err error) {
 			fmt.Println(s, err)
+			time.Sleep(time.Millisecond * 1000)
 		})
-
-	doRequests(cb, 200)
+	doAsync(cb)
 }

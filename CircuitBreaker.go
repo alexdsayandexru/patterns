@@ -35,68 +35,75 @@ func NewCircuitBreaker(handler RequestHandler, callback ResponseCallback) *Circu
 	return &cb
 }
 
-func (cb *CircuitBreaker) handleClose() (string, error) {
-	cb.breakerState = CLOSE
-	return cb.call()
+func (cb *CircuitBreaker) responseHandler(i int, state string, response string, err error) {
+	cb.responseCallback(fmt.Sprintf("[%d] %s %s", i, state, response), err)
 }
 
-func (cb *CircuitBreaker) handleOpen(error error) (string, error) {
+func (cb *CircuitBreaker) handleClose(i int) {
+	cb.breakerState = CLOSE
+	cb.call(i)
+}
+
+func (cb *CircuitBreaker) handleOpen(i int, error error) {
 	cb.breakerState = OPEN
 	cb.failCount = MAX_FAIL_REQUESTS
 	cb.error = error
-	return cb.call()
+	cb.call(i)
 }
 
-func (cb *CircuitBreaker) handleHalf() (string, error) {
+func (cb *CircuitBreaker) handleHalf(i int) {
 	cb.breakerState = HALF
 	cb.successCount = MAX_SUCCESS_REQUESTS
-	return cb.call()
+	cb.call(i)
 }
 
-func (cb *CircuitBreaker) call() (string, error) {
-	if cb.breakerState == CLOSE {
-		return cb.closeRequestHandler()
-	} else if cb.breakerState == HALF {
-		return cb.halfRequestHandler()
-	} else if cb.breakerState == OPEN {
-		return cb.openRequestHandler()
+func (cb *CircuitBreaker) call(i int) {
+	switch cb.breakerState {
+	case CLOSE:
+		cb.closeRequestHandler(i)
+	case HALF:
+		cb.halfRequestHandler(i)
+	case OPEN:
+		cb.openRequestHandler(i)
+	default:
+		panic(fmt.Sprintf("Unknown BreakerState:[%d]", cb.breakerState))
 	}
-	panic(fmt.Sprintf("Unknown BreakerState:[%d]", cb.breakerState))
 }
 
-func (cb *CircuitBreaker) closeRequestHandler() (string, error) {
-	var error error = nil
-	for i := 0; i < MAX_ATTEMPT_REQUESTS; i++ {
-		respond, err := cb.requestHandler()
+func (cb *CircuitBreaker) closeRequestHandler(i int) {
+	var err error = nil
+	for j := 0; j < MAX_ATTEMPT_REQUESTS; j++ {
+		response, err := cb.requestHandler()
 		if err == nil {
-			return "CLOSE:" + respond, nil
+			cb.responseHandler(i, "CLOSE", response, nil)
+			return
 		} else {
-			error = err
+			err = err
 			time.Sleep(time.Second)
 		}
 	}
-	return cb.handleOpen(error)
+	cb.handleOpen(i, err)
 }
 
-func (cb *CircuitBreaker) halfRequestHandler() (string, error) {
+func (cb *CircuitBreaker) halfRequestHandler(i int) {
 	if cb.successCount > 0 {
 		cb.successCount--
-		respond, err := cb.requestHandler()
+		response, err := cb.requestHandler()
 		if err == nil {
-			return "HALF:" + respond, nil
+			cb.responseHandler(i, "HALF", response, nil)
 		} else {
-			return cb.handleOpen(err)
+			cb.handleOpen(i, err)
 		}
 	} else {
-		return cb.handleClose()
+		cb.handleClose(i)
 	}
 }
 
-func (cb *CircuitBreaker) openRequestHandler() (string, error) {
+func (cb *CircuitBreaker) openRequestHandler(i int) {
 	if cb.failCount > 0 {
 		cb.failCount--
-		return "OPEN:", cb.error
+		cb.responseHandler(i, "OPEN", "", cb.error)
 	} else {
-		return cb.handleHalf()
+		cb.handleHalf(i)
 	}
 }
