@@ -11,18 +11,18 @@ const OPEN = 2
 
 const MAX_ATTEMPT_REQUESTS = 5
 const MAX_SUCCESS_REQUESTS = 10
-const OPEN_STATE_SECONDS = 10
+const OPEN_STATE_SECONDS = 5
 
 type RequestHandler = func() (string, error)
 type ResponseCallback = func(string, error)
 type BreakerState = int
 
 type CircuitBreaker struct {
-	breakerState     BreakerState
-	requestHandler   RequestHandler
-	responseCallback ResponseCallback
-	successCount     int
-	error        	 error
+	breakerState         BreakerState
+	requestHandler       RequestHandler
+	responseCallback     ResponseCallback
+	successRequestsCount int
+	error                error
 }
 
 func NewCircuitBreaker(handler RequestHandler, callback ResponseCallback) *CircuitBreaker {
@@ -46,18 +46,17 @@ func (cb *CircuitBreaker) handleClose(i int) {
 func (cb *CircuitBreaker) handleOpen(i int, error error) {
 	timer := time.NewTimer(time.Second * OPEN_STATE_SECONDS)
 	go func() {
-        <-timer.C
-        cb.handleHalf(i)
-    }()
-	cb.breakerState = OPEN
+		<-timer.C
+		cb.handleHalf(i)
+	}()
 	cb.error = error
+	cb.breakerState = OPEN
 	cb.call(i)
 }
 
 func (cb *CircuitBreaker) handleHalf(i int) {
+	cb.successRequestsCount = MAX_SUCCESS_REQUESTS
 	cb.breakerState = HALF
-	cb.successCount = MAX_SUCCESS_REQUESTS
-	cb.call(i)
 }
 
 func (cb *CircuitBreaker) call(i int) {
@@ -78,7 +77,7 @@ func (cb *CircuitBreaker) closeRequestHandler(i int) {
 	for j := 0; j < MAX_ATTEMPT_REQUESTS; j++ {
 		response, e := cb.requestHandler()
 		if e == nil {
-			cb.responseHandler(i, "CLOSE", response, nil)
+			cb.responseHandler(i, "CLOSE:", response, nil)
 			return
 		} else {
 			error = e
@@ -89,11 +88,11 @@ func (cb *CircuitBreaker) closeRequestHandler(i int) {
 }
 
 func (cb *CircuitBreaker) halfRequestHandler(i int) {
-	if cb.successCount > 0 {
-		cb.successCount--
+	if cb.successRequestsCount > 0 {
+		cb.successRequestsCount--
 		response, err := cb.requestHandler()
 		if err == nil {
-			cb.responseHandler(i, "HALF", response, nil)
+			cb.responseHandler(i, "HALF:", response, nil)
 		} else {
 			cb.handleOpen(i, err)
 		}
@@ -103,5 +102,5 @@ func (cb *CircuitBreaker) halfRequestHandler(i int) {
 }
 
 func (cb *CircuitBreaker) openRequestHandler(i int) {
-	cb.responseHandler(i, "OPEN", "", cb.error)
+	cb.responseHandler(i, "OPEN:", "", cb.error)
 }
